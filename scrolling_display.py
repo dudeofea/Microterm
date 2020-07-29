@@ -15,7 +15,7 @@ class ScrollingDisplay():
     def add_string(self, input_str):
         self.buf += input_str
         self.display.string(input_str, self.cursor, self.font)
-        self.display.show()
+        #self.display.show()
 
     def delete_char(self):
         self.buf = self.buf[:-1]
@@ -25,7 +25,7 @@ class ScrollingDisplay():
             self.cursor[1] -= 1
             self.cursor[0] = self.display_width - 1
         self.display.string(chr(127), [self.cursor[0], self.cursor[1]], self.font)
-        self.display.show()
+        #self.display.show()
 
     def redraw(self):
         # split lines longer than screen width
@@ -43,7 +43,7 @@ class ScrollingDisplay():
             self.display.string(lines[i] + pad * " ",
                                 [0, i + self.disp_offset],
                                 self.font)
-        self.display.show()
+        #self.display.show()
 
     def scroll_down(self):
         self.disp_offset -= 1
