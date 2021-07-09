@@ -39,20 +39,30 @@ class ST7565:
     """ST7565 Display controller driver"""
     def __init__(self):
         self.spi = busio.SPI(board.SCK, MOSI=board.MOSI)
-        self.rck = digitalio.DigitalInOut(board.A0)
+        while not self.spi.try_lock():
+            pass
+        self.spi.configure(baudrate=9600)
+        self.spi.unlock()
+
+        print("SPI Speed:", self.spi.frequency)
+        self.reset_pin = digitalio.DigitalInOut(board.D6)
+        self.cs_pin = digitalio.DigitalInOut(board.D10)
+        self.a0_pin = digitalio.DigitalInOut(board.D9)
         self.width = DISPLAY_W
         self.height = DISPLAY_H
         #self.buffer = bytearray(1024)
         self.display_init()
 
     def display_init(self):
-        self.rck.direction = digitalio.Direction.OUTPUT
+        self.reset_pin.direction = digitalio.Direction.OUTPUT
+        self.cs_pin.direction = digitalio.Direction.OUTPUT
+        self.a0_pin.direction = digitalio.Direction.OUTPUT
         self.reset()
         time.sleep(0.001)
         for cmd in (
             CMD_DISPLAY_OFF,  # Display off
             CMD_SET_BIAS_9,  # Display drive voltage 1/9 bias
-            CMD_SET_ADC_NORMAL,  # Reverse SEG
+            CMD_SET_ADC_REVERSE,  # Reverse SEG
             CMD_SET_COL_NORMAL,  # Commmon mode normal direction
             CMD_SET_RESISTOR_RATIO + DISPLAY_RESISTOR_RATIO,  # V5 R ratio
             CMD_SET_VOLUME,  # Contrast
@@ -66,27 +76,19 @@ class ST7565:
     def write_cmd(self, cmd):
         while not self.spi.try_lock():
             pass
-        self.rck.value = True
-        self.spi.write(bytes([0x01]))
-        self.rck.value = False
-        self.rck.value = True
+        self.cs_pin.value = False
+        self.a0_pin.value = False
         self.spi.write(bytes([cmd]))
-        self.rck.value = False
-        self.spi.write(bytes([0x00]))
-        self.rck.value = True
+        self.cs_pin.value = True
         self.spi.unlock()
 
     def write_data(self, buf):
         while not self.spi.try_lock():
             pass
-        self.rck.value = True
-        self.spi.write(bytes([0x00]))
-        self.rck.value = False
-        self.rck.value = True
-        self.spi.write(bytes(buf[1]))
-        self.rck.value = False
-        self.spi.write(buf[1:])
-        self.rck.value = True
+        self.cs_pin.value = False
+        self.a0_pin.value = True
+        self.spi.write(buf)
+        self.cs_pin.value = True
         self.spi.unlock()
 
     def set_contrast(self, value):
@@ -102,17 +104,9 @@ class ST7565:
         self.write_cmd(CMD_COLUMN_LOWER + (0x0F & x))    # set ram addr lsb
 
     def reset(self):
-        while not self.spi.try_lock():
-            pass
-        self.rck.value = True
-        self.spi.write(bytes([0x02]))
-        self.rck.value = False
-        self.rck.value = True
+        self.reset_pin.value = False
         time.sleep(0.001)
-        self.spi.write(bytes([0x00]))
-        self.rck.value = False
-        self.rck.value = True
-        self.spi.unlock()
+        self.reset_pin.value = True
 
     def show(self):
         for i in range(8):
