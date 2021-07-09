@@ -47,6 +47,7 @@ while True:
                 display.scroll_down()
             elif char_input == "[C":
                 print("Right arrow")
+                display.clear()
             else:
                 print("Left arrow")
             display_char = False

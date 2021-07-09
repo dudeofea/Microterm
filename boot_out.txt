@@ -1,1 +1,1 @@
-Adafruit CircuitPython 5.3.0 on 2020-04-29; Adafruit Trinket M0 with samd21e18
+Adafruit CircuitPython 6.0.0 on 2020-11-16; Teensy 4.0 with IMXRT1062DVJ6A

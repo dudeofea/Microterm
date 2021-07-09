@@ -41,7 +41,7 @@ class ST7565:
         self.spi = busio.SPI(board.SCK, MOSI=board.MOSI)
         while not self.spi.try_lock():
             pass
-        self.spi.configure(baudrate=9600)
+        self.spi.configure(baudrate=460800)
         self.spi.unlock()
 
         print("SPI Speed:", self.spi.frequency)
@@ -50,7 +50,6 @@ class ST7565:
         self.a0_pin = digitalio.DigitalInOut(board.D9)
         self.width = DISPLAY_W
         self.height = DISPLAY_H
-        #self.buffer = bytearray(1024)
         self.display_init()
 
     def display_init(self):
@@ -59,100 +58,103 @@ class ST7565:
         self.a0_pin.direction = digitalio.Direction.OUTPUT
         self.reset()
         time.sleep(0.001)
-        for cmd in (
+        self.write_cmds([
             CMD_DISPLAY_OFF,  # Display off
             CMD_SET_BIAS_9,  # Display drive voltage 1/9 bias
-            CMD_SET_ADC_REVERSE,  # Reverse SEG
+            CMD_SET_ADC_NORMAL,  # Reverse SEG
             CMD_SET_COL_NORMAL,  # Commmon mode normal direction
             CMD_SET_RESISTOR_RATIO + DISPLAY_RESISTOR_RATIO,  # V5 R ratio
             CMD_SET_VOLUME,  # Contrast
             DISPLAY_CONTRAST,  # Contrast value
-                CMD_SET_POWER + DISPLAY_POWER_MODE):
-            self.write_cmd(cmd)
-        self.show()
+            CMD_SET_POWER + DISPLAY_POWER_MODE
+        ])
+        self.clear()
         self.set_cursor(0, 0)
-        self.write_cmd(CMD_DISPLAY_ON)
+        self.write_cmds([CMD_DISPLAY_ON])
 
-    def write_cmd(self, cmd):
+    def write_cmds(self, cmds):
         while not self.spi.try_lock():
             pass
-        self.cs_pin.value = False
         self.a0_pin.value = False
-        self.spi.write(bytes([cmd]))
+        self.cs_pin.value = False
+        self.spi.write(bytes(cmds))
         self.cs_pin.value = True
         self.spi.unlock()
 
     def write_data(self, buf):
         while not self.spi.try_lock():
             pass
-        self.cs_pin.value = False
         self.a0_pin.value = True
-        self.spi.write(buf)
+        self.cs_pin.value = False
+        try:
+            self.spi.write(buf)
+        except OSError:
+            self.spi.write(buf)
         self.cs_pin.value = True
         self.spi.unlock()
 
     def set_contrast(self, value):
         if 0x1 <= value <= 0x3f:
-            for cmd in (
-                CMD_SET_VOLUME,
-                    value):
-                self.write_cmd(cmd)
+            self.write_cmds([CMD_SET_VOLUME, value])
 
     def set_cursor(self, x, y):
-        self.write_cmd(CMD_SET_PAGE + (8 - y - 1))    # set row
-        self.write_cmd(CMD_COLUMN_UPPER + (0xF0 & x))    # set ram addr msb
-        self.write_cmd(CMD_COLUMN_LOWER + (0x0F & x))    # set ram addr lsb
+        self.write_cmds([
+            CMD_SET_PAGE + (7 - y),            # set row
+            CMD_COLUMN_UPPER + ((0xF0 & x) >> 4),    # set ram addr msb
+            CMD_COLUMN_LOWER + (0x0F & x)          # set ram addr lsb
+        ])
 
     def reset(self):
         self.reset_pin.value = False
         time.sleep(0.001)
         self.reset_pin.value = True
 
-    def show(self):
+    def clear(self):
+        buf = [0x00] * 128
         for i in range(8):
-            self.write_cmd(CMD_SET_PAGE + i)
-            self.write_cmd(CMD_COLUMN_UPPER)    # set ram addr to 0
-            self.write_cmd(CMD_COLUMN_LOWER)
-            #self.write_data(self.buffer[i*128:(i+1)*128])
+            self.set_cursor(0, i)
+            self.write_data(bytes(buf))
 
-    #def char(self, x, y, character, width):
-    #    for i in range(len(character)):
-    #        self.buffer[(8 - y - 1)*128 + x*width + i] = character[i]
+    def add_blocks(self, values, pos):
+        self.set_cursor(pos[0], pos[1])
+        self.write_data(bytes(values))
 
-    def string(self, input_str, input_pos, font_map):
-        self.set_cursor(input_pos[0], input_pos[1])
-        print(input_str, input_pos)
-        # TODO: don't assume font's are 5x7 w/o spacing
-        f_width = font_map["width"] + 1
-        width = int((128 - (128 % f_width)) / f_width)
-        height = 8
-        pos = input_pos
-        buf = [0x00] * width * f_width
-        off = 1
+    def add_string(self, input_str, pos, font_map):
+        self.set_cursor(pos[0], pos[1])
+        font_width = font_map["width"] + 1
+        width = int((128 - (128 % font_width)) / font_width)
+        line_buf = [0x00] * width * font_width
+        line_x = 0
+        print("Add string:", pos)
+        print_str = ""
         for c in input_str:
+            # go down in y by 1 if newline
             if c == '\n':
-                pos[0] = 0
-                pos[1] += 1
-                print(pos)
-                off = 1
-                self.write_data(bytes(buf))
+                pos = [0, pos[1] + 1]
+                self.write_data(bytes(line_buf))
                 self.set_cursor(pos[0], pos[1])
-                buf = [0x00] * width * f_width
+                line_buf = [0x00] * width * font_width
+                line_x = 0
+                print_str += str(pos) + "\n"
                 continue
+            else:
+                print_str += c
 
-            #self.char(pos[0], pos[1], font_map["data"][ord(c) - 32], f_width)
+            # add character to line buffer
             char = font_map["data"][ord(c) - 32]
-            buf[off:off+len(char)] = char
-            off += f_width
+            line_buf[line_x:line_x+len(char)] = char
+            line_x += font_width
 
+            # increment x, and y if needed
             pos[0] += 1
             if pos[0] >= width:
-                pos[1] += 1
-                pos[0] = 0
-                print(pos)
-                off = 1
-                self.write_data(bytes(buf))
+                pos = [0, pos[1] + 1]
+                self.write_data(bytes(line_buf))
                 self.set_cursor(pos[0], pos[1])
-                buf = [0x00] * width * f_width
-        self.write_data(bytes(buf))
+                line_buf = [0x00] * width * font_width
+                line_x = 0
+                print_str += str(pos) + "\n"
+
+        self.write_data(bytes(line_buf))
+        print(print_str)
         return pos
